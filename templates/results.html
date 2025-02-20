@@ -1,0 +1,39 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>Результаты классификации</title>
+    <style>
+        table, th, td {
+            border: 1px solid black;
+            border-collapse: collapse;
+        }
+        th, td {
+            padding: 8px;
+        }
+    </style>
+</head>
+<body>
+    <h1>Результаты классификации</h1>
+    <table>
+        <thead>
+            <tr>
+                <th>Жалоба</th>
+                <th>Кластер</th>
+                <th>Категория</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for item in results %}
+            <tr>
+                <td>{{ item.complaint }}</td>
+                <td>{{ item.cluster }}</td>
+                <td>{{ item.category }}</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    <br>
+    <a href="/">Вернуться назад</a>
+</body>
+</html>

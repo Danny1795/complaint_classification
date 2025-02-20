@@ -1,0 +1,50 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>Загрузка жалоб</title>
+    <style>
+        #loader {
+            display: none;
+            text-align: center;
+            margin-top: 20px;
+        }
+        .spinner {
+            border: 8px solid #f3f3f3; 
+            border-top: 8px solid #3498db; 
+            border-radius: 50%;
+            width: 60px;
+            height: 60px;
+            animation: spin 1s linear infinite;
+            margin: auto;
+        }
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+    </style>
+</head>
+<body>
+    <h1>Загрузите Excel-файл с жалобами</h1>
+    {% if error %}
+      <p style="color:red;">{{ error }}</p>
+    {% endif %}
+    <form id="upload-form" action="/upload" method="post" enctype="multipart/form-data">
+        <input type="file" name="file" accept=".xlsx" required>
+        <button type="submit" id="submit-btn">Загрузить</button>
+    </form>
+    <!-- Loader, который отображается при отправке формы -->
+    <div id="loader">
+        <div class="spinner"></div>
+        <p>Файл загружается, пожалуйста, подождите...</p>
+    </div>
+
+    <script>
+        // При отправке формы показываем лоадер
+        const form = document.getElementById('upload-form');
+        form.addEventListener('submit', function() {
+            document.getElementById('loader').style.display = 'block';
+        });
+    </script>
+</body>
+</html>
