@@ -31,27 +31,41 @@ categories = {
     6: "Прочие жалобы"
 }
 
-def extract_route_number(text: str) -> str:
-    """
-    Извлекает номер маршрута из текста жалобы по шаблонам:
-      - 'м/а' или 'а/м', за которыми следует число,
-      - символ '№' и число,
-      - число, за которым следует слово 'маршрут'
-    """
+def extract_all_numbers(text: str) -> str:
     patterns = [
-        r'(?:м/а|а/м)\s*(\d+)',
-        r'№\s*(\d+)',
-        r'(\d+)\s*маршрут'
+        r'((?:\d+[а-яa-z0-9\-]*(?:,\s*)?)+)\s*маршрут',
+        r'номер\s*автобуса\s*(\d+[а-яa-z0-9\-]*)',
+        r'(?:в|на)\s+автобусе\s*(?:№\s*)?(\d+[а-яa-z0-9\-]*)',
+        r'(\d+[а-яa-z0-9\-]*)\s*автобус',
+        r'(?:м/а|а/м|ма)\s*(\d+[а-яa-z0-9\-]*)',
+        r'(\d+[а-яa-z0-9\-]*)\s*(?=м/а|а/м|ма)',
+        r'маршрут(?:\s*автобуса)?\s*(?:№\s*)?(\d+[а-яa-z0-9\-]*)',
+        r'№\s*(\d+[а-яa-z0-9\-]*)',
+        r'(\d+[а-яa-z0-9\-]*)-го\s*маршрут',
+        r'(?:кюар|KYUAR)\s*(\d+)',
     ]
+    matches = []
     for pattern in patterns:
-        match = re.search(pattern, text, flags=re.IGNORECASE)
-        if match:
-            return match.group(1)
-    return None
+        found = re.findall(pattern, text, flags=re.IGNORECASE)
+        if found:
+            for item in found:
+                if ',' in item:
+                    parts = re.split(r',\s*', item)
+                    matches.extend(parts)
+                else:
+                    matches.append(item)
+    seen = set()
+    unique_matches = []
+    for m in matches:
+        m = m.strip()
+        if m and m not in seen:
+            seen.add(m)
+            unique_matches.append(m)
+    return ", ".join(unique_matches) if unique_matches else None
 
 def classify_complaints_batch(complaints, batch_size=32):
     predictions = []
-    start_time = time.perf_counter()  
+    start_time = time.perf_counter()
     for i in range(0, len(complaints), batch_size):
         batch = complaints[i:i+batch_size]
         inputs = tokenizer(
@@ -84,18 +98,18 @@ async def process_file(request: Request, file: UploadFile = File(...)):
     
     if "Описание" not in data.columns:
         return templates.TemplateResponse("index.html", {"request": request, "error": "В файле отсутствует колонка 'Описание'."})
-
+    
     complaints = [str(row["Описание"]) for idx, row in data.iterrows() if pd.notna(row["Описание"])]
     predictions = classify_complaints_batch(complaints, batch_size=32)
-
+    
     results = []
     for complaint, cluster in zip(complaints, predictions):
-        route = extract_route_number(complaint)
+        numbers = extract_all_numbers(complaint)
         results.append({
             "complaint": complaint,
             "cluster": cluster,
             "category": categories.get(cluster, "Неизвестная категория"),
-            "route": route if route else "Не найден"
+            "route": numbers if numbers else "Не найден"
         })
-
+    
     return templates.TemplateResponse("results.html", {"request": request, "results": results})
