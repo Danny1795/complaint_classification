@@ -1,5 +1,6 @@
 import io
 import time
+import re
 import pandas as pd
 from fastapi import FastAPI, File, UploadFile, Request
 from fastapi.responses import HTMLResponse
@@ -30,6 +31,24 @@ categories = {
     6: "Прочие жалобы"
 }
 
+def extract_route_number(text: str) -> str:
+    """
+    Извлекает номер маршрута из текста жалобы по шаблонам:
+      - 'м/а' или 'а/м', за которыми следует число,
+      - символ '№' и число,
+      - число, за которым следует слово 'маршрут'
+    """
+    patterns = [
+        r'(?:м/а|а/м)\s*(\d+)',
+        r'№\s*(\d+)',
+        r'(\d+)\s*маршрут'
+    ]
+    for pattern in patterns:
+        match = re.search(pattern, text, flags=re.IGNORECASE)
+        if match:
+            return match.group(1)
+    return None
+
 def classify_complaints_batch(complaints, batch_size=32):
     predictions = []
     start_time = time.perf_counter()  
@@ -47,7 +66,7 @@ def classify_complaints_batch(complaints, batch_size=32):
             outputs = model(**inputs)
         batch_preds = torch.argmax(outputs.logits, dim=1).tolist()
         predictions.extend(batch_preds)
-    elapsed_time = time.perf_counter() - start_time  # Вычисляем затраченное время
+    elapsed_time = time.perf_counter() - start_time
     print(f"Классификация {len(complaints)} жалоб заняла {elapsed_time:.4f} секунд")
     return predictions
 
@@ -67,15 +86,16 @@ async def process_file(request: Request, file: UploadFile = File(...)):
         return templates.TemplateResponse("index.html", {"request": request, "error": "В файле отсутствует колонка 'Описание'."})
 
     complaints = [str(row["Описание"]) for idx, row in data.iterrows() if pd.notna(row["Описание"])]
-
     predictions = classify_complaints_batch(complaints, batch_size=32)
 
     results = []
     for complaint, cluster in zip(complaints, predictions):
+        route = extract_route_number(complaint)
         results.append({
             "complaint": complaint,
             "cluster": cluster,
-            "category": categories.get(cluster, "Неизвестная категория")
+            "category": categories.get(cluster, "Неизвестная категория"),
+            "route": route if route else "Не найден"
         })
 
     return templates.TemplateResponse("results.html", {"request": request, "results": results})
