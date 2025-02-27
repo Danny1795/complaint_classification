@@ -3,7 +3,7 @@ import time
 import re
 import pandas as pd
 from fastapi import FastAPI, File, UploadFile, Request
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, StreamingResponse
 from fastapi.templating import Jinja2Templates
 from transformers import AutoTokenizer, AutoModelForSequenceClassification
 import torch
@@ -31,19 +31,26 @@ categories = {
     6: "Прочие жалобы"
 }
 
+latest_results = None
+
 def extract_all_numbers(text: str) -> str:
+    allowed_suffix = r"[АаБбМм]"
+
+    text = re.sub(r'(?i)[Кк]юар\s*\d+(?:\s*' + allowed_suffix + r')?', '', text)
+    text = re.sub(r'(?i)[гГ]\.?ос\.?\s*номер\s*\d+(?:\s*' + allowed_suffix + r')?', '', text)
+
     patterns = [
-        r'((?:\d+[а-яa-z0-9\-]*(?:,\s*)?)+)\s*маршрут',
-        r'номер\s*автобуса\s*(\d+[а-яa-z0-9\-]*)',
-        r'(?:в|на)\s+автобусе\s*(?:№\s*)?(\d+[а-яa-z0-9\-]*)',
-        r'(\d+[а-яa-z0-9\-]*)\s*автобус',
-        r'(?:м/а|а/м|ма)\s*(\d+[а-яa-z0-9\-]*)',
-        r'(\d+[а-яa-z0-9\-]*)\s*(?=м/а|а/м|ма)',
-        r'маршрут(?:\s*автобуса)?\s*(?:№\s*)?(\d+[а-яa-z0-9\-]*)',
-        r'№\s*(\d+[а-яa-z0-9\-]*)',
-        r'(\d+[а-яa-z0-9\-]*)-го\s*маршрут',
-        r'(?:кюар|KYUAR)\s*(\d+)',
+        rf'(?:(?:маршрут(?:а|ном|ного)?|маршр|марш)[\s\-]*(?:автобуса[\s\-]*)?(?:№[\s\-]*)?)(\d+(?:\s*{allowed_suffix})?)',
+        rf'(?:(?:автобус(?:ов|а|ы)?|авт)[\s\-]*(?:№[\s\-]*)?)(\d+(?:\s*{allowed_suffix})?)',
+        rf'(?:(?:м[\/\\\-]?а|М[\/\\\-]?А|МА|мА)[\s\-:]*)(\d+(?:\s*{allowed_suffix})?)',
+        rf'(?:No[\s\-]?)(\d+(?:\s*{allowed_suffix})?)',
+        rf'(?:#\s*)(\d+(?:\s*{allowed_suffix})?)',
+        rf'(?:№[\s\-]?)(\d+(?:\s*{allowed_suffix})?)',
+        rf'(\d+(?:\s*{allowed_suffix})?)\s*(?=(?:маршрут(?:а|ном|ного)?|маршр|марш))',
+        rf'(\d+(?:\s*{allowed_suffix})?)\s*(?=(?:автобус(?:ов|а|ы)?|авт))',
+        rf'(\d+(?:\s*{allowed_suffix})?)\s*(?=(?:м[\/\\\-]?\s*а|М[\/\\\-]?\s*А|МА|мА))',
     ]
+
     matches = []
     for pattern in patterns:
         found = re.findall(pattern, text, flags=re.IGNORECASE)
@@ -54,6 +61,7 @@ def extract_all_numbers(text: str) -> str:
                     matches.extend(parts)
                 else:
                     matches.append(item)
+
     seen = set()
     unique_matches = []
     for m in matches:
@@ -61,7 +69,9 @@ def extract_all_numbers(text: str) -> str:
         if m and m not in seen:
             seen.add(m)
             unique_matches.append(m)
+
     return ", ".join(unique_matches) if unique_matches else None
+
 
 def classify_complaints_batch(complaints, batch_size=32):
     predictions = []
@@ -112,4 +122,21 @@ async def process_file(request: Request, file: UploadFile = File(...)):
             "route": numbers if numbers else "Не найден"
         })
     
+    global latest_results
+    latest_results = pd.DataFrame(results)
+    
     return templates.TemplateResponse("results.html", {"request": request, "results": results})
+
+@app.get("/download")
+async def download_results():
+    global latest_results
+    if latest_results is None or latest_results.empty:
+        return {"error": "Результаты отсутствуют. Сначала загрузите файл."}
+    stream = io.BytesIO()
+    latest_results.to_excel(stream, index=False)
+    stream.seek(0)
+    return StreamingResponse(
+        stream,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": "attachment; filename=results.xlsx"}
+    )
